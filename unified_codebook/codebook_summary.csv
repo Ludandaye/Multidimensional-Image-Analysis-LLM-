@@ -1,0 +1,2 @@
+total_vectors,total_images,total_digits,n_clusters,feature_dimensions,codebook_file,analysis_file,model_file,codebook_size_mb
+300000,1000,10,500,9,unified_codebook.csv,cluster_analysis.csv,kmeans_model.pkl,0.07714080810546875
