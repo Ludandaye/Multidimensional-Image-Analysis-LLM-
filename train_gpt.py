@@ -16,10 +16,68 @@ import os
 import argparse
 from typing import List, Dict, Any
 import logging
+import time
+import datetime
+from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, MofNCompleteColumn, BarColumn, TextColumn, TimeRemainingColumn
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+import pickle
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# 创建富文本控制台
+console = Console()
+
+def save_checkpoint(model, optimizer, scheduler, epoch, train_loss, val_loss, best_val_loss, checkpoint_dir):
+    """保存训练检查点"""
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'train_loss': train_loss,
+        'val_loss': val_loss,
+        'best_val_loss': best_val_loss,
+        'timestamp': datetime.datetime.now().isoformat()
+    }
+    checkpoint_path = os.path.join(checkpoint_dir, 'checkpoint.pkl')
+    torch.save(checkpoint, checkpoint_path)
+    logger.info(f"检查点已保存到: {checkpoint_path}")
+
+def load_checkpoint(checkpoint_dir):
+    """加载训练检查点"""
+    checkpoint_path = os.path.join(checkpoint_dir, 'checkpoint.pkl')
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        logger.info(f"从检查点恢复训练: {checkpoint_path}")
+        logger.info(f"上次训练时间: {checkpoint['timestamp']}")
+        logger.info(f"恢复到第 {checkpoint['epoch']} 轮")
+        return checkpoint
+    return None
+
+def display_training_stats(epoch, num_epochs, train_loss, val_loss, train_ppl, val_ppl, 
+                          best_val_loss, learning_rate, elapsed_time, eta):
+    """显示训练统计信息"""
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("指标", style="cyan", no_wrap=True)
+    table.add_column("数值", style="yellow")
+    
+    table.add_row("轮次", f"{epoch}/{num_epochs}")
+    table.add_row("训练损失", f"{train_loss:.4f}")
+    table.add_row("验证损失", f"{val_loss:.4f}")
+    table.add_row("训练困惑度", f"{train_ppl:.2f}")
+    table.add_row("验证困惑度", f"{val_ppl:.2f}")
+    table.add_row("最佳验证损失", f"{best_val_loss:.4f}")
+    table.add_row("学习率", f"{learning_rate:.2e}")
+    table.add_row("已用时间", f"{elapsed_time}")
+    table.add_row("预计剩余", f"{eta}")
+    
+    console.print(Panel(table, title=f"[bold green]训练进度 - 第 {epoch} 轮[/bold green]", 
+                       border_style="green"))
 
 class CausalLMDataset(Dataset):
     """因果语言模型数据集类"""
@@ -82,6 +140,15 @@ class CustomGPT2Config(GPT2Config):
         self.n_embd = 384 # 原始是768维
         self.n_positions = 1024
         self.n_ctx = 1024
+    
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
+        """从预训练模型加载配置"""
+        config = super().from_pretrained(pretrained_model_name_or_path, *args, **kwargs)
+        # 确保所有必要的参数都被设置
+        if not hasattr(config, 'vocab_size'):
+            config.vocab_size = 50257  # GPT2默认词汇表大小
+        return config
 
 class CausalGPT2LM(nn.Module):
     """因果语言模型GPT2"""
@@ -139,61 +206,64 @@ def create_tokenizer(vocab_path: str, model_name: str = "gpt2"):
     logger.info(f"词汇表大小: {len(tokenizer)}")
     return tokenizer
 
-def train_model(model, train_dataloader, val_dataloader, device, num_epochs=10, learning_rate=5e-5):
-    """训练模型"""
+def train_model(model, train_dataloader, val_dataloader, device, num_epochs=10, learning_rate=5e-5, resume_from_checkpoint=True):
+    """训练模型 - 支持断点续训和详细进度显示"""
     
     # 优化器和学习率调度器
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
-    # 训练循环
+    # 初始化训练状态
+    start_epoch = 0
     best_val_loss = float('inf')
+    train_start_time = time.time()
     
-    for epoch in range(num_epochs):
-        # 训练阶段
+    # 尝试加载检查点
+    checkpoint_dir = 'outputs/checkpoints'
+    if resume_from_checkpoint:
+        checkpoint = load_checkpoint(checkpoint_dir)
+        if checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_loss = checkpoint['best_val_loss']
+            console.print(f"[green]✅ 从第 {checkpoint['epoch']} 轮恢复训练[/green]")
+    
+    # 显示训练开始信息
+    console.print(Panel(f"[bold blue]开始训练 GPT 模型[/bold blue]\n"
+                       f"总轮数: {num_epochs}\n"
+                       f"开始轮数: {start_epoch + 1}\n"
+                       f"学习率: {learning_rate}\n"
+                       f"设备: {device}", title="训练配置", border_style="blue"))
+    
+    # 训练循环
+    for epoch in range(start_epoch, num_epochs):
+        epoch_start_time = time.time()
+        
+        # 训练阶段 - 使用Rich进度条
         model.train()
         train_loss = 0.0
         
-        train_pbar = tqdm(train_dataloader, desc=f'Epoch {epoch+1}/{num_epochs} [Train]')
-        for batch in train_pbar:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['labels'].to(device)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("•"),
+            TimeElapsedColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            train_task = progress.add_task(f"[cyan]第 {epoch+1}/{num_epochs} 轮 - 训练", total=len(train_dataloader))
             
-            optimizer.zero_grad()
-            
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels
-            )
-            
-            loss = outputs['loss']
-            loss.backward()
-            
-            # 梯度裁剪
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            optimizer.step()
-            
-            train_loss += loss.item()
-            
-            # 计算困惑度 (perplexity)
-            train_pbar.set_postfix({
-                'Loss': f'{loss.item():.4f}',
-                'PPL': f'{torch.exp(loss).item():.2f}'
-            })
-        
-        # 验证阶段
-        model.eval()
-        val_loss = 0.0
-        
-        with torch.no_grad():
-            val_pbar = tqdm(val_dataloader, desc=f'Epoch {epoch+1}/{num_epochs} [Val]')
-            for batch in val_pbar:
+            for batch_idx, batch in enumerate(train_dataloader):
                 input_ids = batch['input_ids'].to(device)
                 attention_mask = batch['attention_mask'].to(device)
                 labels = batch['labels'].to(device)
+                
+                optimizer.zero_grad()
                 
                 outputs = model(
                     input_ids=input_ids,
@@ -202,13 +272,56 @@ def train_model(model, train_dataloader, val_dataloader, device, num_epochs=10, 
                 )
                 
                 loss = outputs['loss']
-                val_loss += loss.item()
+                loss.backward()
                 
-                # 计算困惑度 (perplexity)
-                val_pbar.set_postfix({
-                    'Loss': f'{loss.item():.4f}',
-                    'PPL': f'{torch.exp(loss).item():.2f}'
-                })
+                # 梯度裁剪
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                optimizer.step()
+                
+                train_loss += loss.item()
+                current_ppl = torch.exp(loss).item()
+                
+                # 更新进度条
+                progress.update(train_task, advance=1, 
+                              description=f"[cyan]第 {epoch+1}/{num_epochs} 轮 - 训练 Loss: {loss.item():.4f} PPL: {current_ppl:.2f}")
+        
+        # 验证阶段 - 使用Rich进度条
+        model.eval()
+        val_loss = 0.0
+        
+        with torch.no_grad():
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TextColumn("•"),
+                TimeElapsedColumn(),
+                TextColumn("•"),
+                TimeRemainingColumn(),
+                console=console
+            ) as progress:
+                val_task = progress.add_task(f"[yellow]第 {epoch+1}/{num_epochs} 轮 - 验证", total=len(val_dataloader))
+                
+                for batch_idx, batch in enumerate(val_dataloader):
+                    input_ids = batch['input_ids'].to(device)
+                    attention_mask = batch['attention_mask'].to(device)
+                    labels = batch['labels'].to(device)
+                    
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=labels
+                    )
+                    
+                    loss = outputs['loss']
+                    val_loss += loss.item()
+                    current_ppl = torch.exp(loss).item()
+                    
+                    # 更新进度条
+                    progress.update(val_task, advance=1,
+                                  description=f"[yellow]第 {epoch+1}/{num_epochs} 轮 - 验证 Loss: {loss.item():.4f} PPL: {current_ppl:.2f}")
         
         # 计算平均损失和困惑度
         avg_train_loss = train_loss / len(train_dataloader)
@@ -216,9 +329,25 @@ def train_model(model, train_dataloader, val_dataloader, device, num_epochs=10, 
         avg_train_ppl = torch.exp(torch.tensor(avg_train_loss))
         avg_val_ppl = torch.exp(torch.tensor(avg_val_loss))
         
-        logger.info(f'Epoch {epoch+1}/{num_epochs}:')
-        logger.info(f'  Train Loss: {avg_train_loss:.4f}, Train PPL: {avg_val_ppl:.2f}')
-        logger.info(f'  Val Loss: {avg_val_loss:.4f}, Val PPL: {avg_val_ppl:.2f}')
+        # 计算时间统计
+        epoch_time = time.time() - epoch_start_time
+        total_elapsed = time.time() - train_start_time
+        remaining_epochs = num_epochs - epoch - 1
+        eta = remaining_epochs * (total_elapsed / (epoch - start_epoch + 1)) if epoch > start_epoch else 0
+        
+        # 格式化时间显示
+        elapsed_str = str(datetime.timedelta(seconds=int(total_elapsed)))
+        eta_str = str(datetime.timedelta(seconds=int(eta)))
+        
+        # 显示详细统计信息
+        display_training_stats(
+            epoch + 1, num_epochs, avg_train_loss, avg_val_loss,
+            avg_train_ppl, avg_val_ppl, best_val_loss,
+            scheduler.get_last_lr()[0], elapsed_str, eta_str
+        )
+        
+        # 保存检查点
+        save_checkpoint(model, optimizer, scheduler, epoch, avg_train_loss, avg_val_loss, best_val_loss, checkpoint_dir)
         
         # 保存最佳模型
         if avg_val_loss < best_val_loss:
@@ -227,24 +356,36 @@ def train_model(model, train_dataloader, val_dataloader, device, num_epochs=10, 
             best_model_dir = 'outputs/best_model'
             os.makedirs(best_model_dir, exist_ok=True)
             
-            # 保存模型权重
-            model.save_pretrained(best_model_dir)
+            # 保存模型权重 - 使用内部的transformer模型
+            try:
+                model.transformer.save_pretrained(best_model_dir)
+            except Exception as e:
+                logger.warning(f"保存模型时出现警告: {e}")
+                # 使用torch.save作为备选方案
+                torch.save(model.state_dict(), os.path.join(best_model_dir, 'pytorch_model.bin'))
+                logger.info("使用torch.save保存模型权重")
+            
             # 保存tokenizer
             tokenizer.save_pretrained(best_model_dir)
+            
             # 保存训练配置
-            config.save_pretrained(best_model_dir)
+            try:
+                config.save_pretrained(best_model_dir)
+            except Exception as e:
+                logger.warning(f"保存配置时出现警告: {e}")
+                # 手动保存配置
+                config_dict = config.to_dict()
+                with open(os.path.join(best_model_dir, 'config.json'), 'w') as f:
+                    json.dump(config_dict, f, indent=2)
+                logger.info("手动保存配置文件")
             
-            # 保存训练状态
-            torch.save({
-                'epoch': epoch,
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_loss': best_val_loss,
-                'val_ppl': avg_val_ppl.item()
-            }, os.path.join(best_model_dir, 'training_args.bin'))
-            
+            console.print(f"[green]🎉 新的最佳模型！验证损失: {best_val_loss:.4f}, 困惑度: {avg_val_ppl:.2f}[/green]")
             logger.info(f'保存最佳模型到 {best_model_dir}, 验证损失: {best_val_loss:.4f}, 困惑度: {avg_val_ppl:.2f}')
         
         scheduler.step()
+        
+        # 添加分隔线
+        console.print("─" * 80)
     
     return model
 
@@ -302,13 +443,16 @@ def main():
     logger.info(f"模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
     
     # 训练模型
+    console.print(Panel("[bold green]开始训练 GPT 模型[/bold green]", border_style="green"))
+    
     trained_model = train_model(
         model=model,
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         device=device,
         num_epochs=args.num_epochs,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        resume_from_checkpoint=True
     )
     
     # 保存最终模型为HuggingFace标准格式
@@ -316,11 +460,33 @@ def main():
     os.makedirs(final_model_dir, exist_ok=True)
     
     # 保存模型权重
-    trained_model.save_pretrained(final_model_dir)
+    try:
+        trained_model.transformer.save_pretrained(final_model_dir)
+    except Exception as e:
+        logger.warning(f"保存最终模型时出现警告: {e}")
+        # 使用torch.save作为备选方案
+        torch.save(trained_model.state_dict(), os.path.join(final_model_dir, 'pytorch_model.bin'))
+        logger.info("使用torch.save保存最终模型权重")
     # 保存tokenizer
     tokenizer.save_pretrained(final_model_dir)
     # 保存训练配置
-    config.save_pretrained(final_model_dir)
+    try:
+        config.save_pretrained(final_model_dir)
+    except Exception as e:
+        logger.warning(f"保存配置时出现警告: {e}")
+        # 手动保存配置
+        config_dict = config.to_dict()
+        with open(os.path.join(final_model_dir, 'config.json'), 'w') as f:
+            json.dump(config_dict, f, indent=2)
+        logger.info("手动保存配置文件")
+    
+    # 显示训练完成信息
+    console.print(Panel(f"[bold green]🎉 训练完成！[/bold green]\n\n"
+                       f"📁 最佳模型: outputs/best_model/\n"
+                       f"📁 最终模型: {final_model_dir}/\n"
+                       f"💡 现在可以使用 from_pretrained() 直接加载模型！\n"
+                       f"🚀 运行推理: python inference.py --model_path outputs/best_model",
+                       title="训练完成", border_style="green"))
     
     logger.info(f"训练完成！模型已保存为HuggingFace标准格式到 {final_model_dir}")
     logger.info("现在可以使用 from_pretrained() 直接加载模型！")
