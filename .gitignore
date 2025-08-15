@@ -1,8 +1,7 @@
 *.bin
 *.pkl
 *.pth
-outputs/best_model/
-outputs/final_model/
 __pycache__/
 *.pyc
 *.log
+.DS_Store
