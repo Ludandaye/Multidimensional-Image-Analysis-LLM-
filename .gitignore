@@ -1,0 +1,24 @@
+# 排除大型训练文件
+*.pkl
+**/checkpoints/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# 排除临时文件
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# 排除IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

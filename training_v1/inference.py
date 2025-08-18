@@ -4,6 +4,7 @@
 推理脚本：使用训练好的GPT因果语言模型进行文本生成和next-token预测
 """
 
+import os
 import torch
 import json
 from transformers import GPT2Tokenizer

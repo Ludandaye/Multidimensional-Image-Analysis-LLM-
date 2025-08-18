@@ -1,0 +1,17 @@
+{
+  "model_type": "gpt2",
+  "tokenizer_class": "GPT2Tokenizer",
+  "vocab_file": "vocab.json",
+  "merges_file": null,
+  "errors": "replace",
+  "unk_token": "<unk>",
+  "bos_token": "<s>",
+  "eos_token": "</s>",
+  "pad_token": "<pad>",
+  "cls_token": "<cls>",
+  "sep_token": "<sep>",
+  "mask_token": "<mask>",
+  "add_bos_token": false,
+  "add_eos_token": false,
+  "clean_up_tokenization_spaces": true
+}
