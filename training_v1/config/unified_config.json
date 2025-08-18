@@ -1,0 +1,74 @@
+{
+  "special_tokens": {
+    "pad_token": "<PAD>",
+    "unk_token": "<UNK>",
+    "eos_token": "<EOS>",
+    "img_start_token": "<IMG>",
+    "img_end_token": "</IMG>",
+    "cls_token": "<CLS>",
+    "cls_tokens": [
+      "<CLS_0>",
+      "<CLS_1>",
+      "<CLS_2>",
+      "<CLS_3>",
+      "<CLS_4>",
+      "<CLS_5>",
+      "<CLS_6>",
+      "<CLS_7>",
+      "<CLS_8>",
+      "<CLS_9>"
+    ]
+  },
+  "model": {
+    "model_type": "gpt2",
+    "vocab_size": 516,
+    "n_positions": 512,
+    "n_ctx": 512,
+    "n_embd": 384,
+    "n_layer": 6,
+    "n_head": 8,
+    "max_length": 512,
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "num_epochs": 30,
+    "warmup_steps": 100
+  },
+  "data": {
+    "train_data_path": "generated_sequences_super_enhanced/sequences_labels_fixed_tail_fixed.jsonl",
+    "vocab_path": "generated_sequences_super_enhanced/vocab.json",
+    "codebook_path": "unified_codebook/unified_codebook.csv",
+    "max_length": 512,
+    "train_ratio": 0.8,
+    "val_ratio": 0.2,
+    "truncation_strategy": "left",
+    "preserve_tail_tokens": 10
+  },
+  "experiment": {
+    "experiment_name": "training_v2_fixed",
+    "experiment_version": "2.1",
+    "created_time": "2025-08-18T21:13:40.479058",
+    "data_version": "sequences_labels_fixed_tail_fixed",
+    "vocab_version": "v1_516_tokens",
+    "model_version": "gpt2_6layer_384dim"
+  },
+  "token_ids": {
+    "pad_token": 0,
+    "unk_token": 1,
+    "eos_token": 5,
+    "img_start_token": 2,
+    "img_end_token": 3,
+    "cls_token": 4,
+    "cls_tokens": [
+      506,
+      507,
+      508,
+      509,
+      510,
+      511,
+      512,
+      513,
+      514,
+      515
+    ]
+  }
+}

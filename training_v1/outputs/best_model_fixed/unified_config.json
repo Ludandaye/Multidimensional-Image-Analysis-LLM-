@@ -1,0 +1,42 @@
+{
+  "model_type": "gpt2",
+  "vocab_size": 516,
+  "n_positions": 512,
+  "n_ctx": 512,
+  "n_embd": 384,
+  "n_layer": 6,
+  "n_head": 8,
+  "max_length": 512,
+  "batch_size": 16,
+  "learning_rate": 0.0001,
+  "num_epochs": 30,
+  "warmup_steps": 100,
+  "special_tokens": {
+    "pad_token": "<PAD>",
+    "unk_token": "<UNK>",
+    "eos_token": "<EOS>",
+    "img_start_token": "<IMG>",
+    "img_end_token": "</IMG>",
+    "cls_token": "<CLS>",
+    "cls_tokens": [
+      "<CLS_0>",
+      "<CLS_1>",
+      "<CLS_2>",
+      "<CLS_3>",
+      "<CLS_4>",
+      "<CLS_5>",
+      "<CLS_6>",
+      "<CLS_7>",
+      "<CLS_8>",
+      "<CLS_9>"
+    ]
+  },
+  "experiment": {
+    "experiment_name": "training_v2_fixed",
+    "experiment_version": "2.1",
+    "created_time": "2025-08-18T21:23:03.352674",
+    "data_version": "sequences_labels_fixed_tail_fixed",
+    "vocab_version": "v1_516_tokens",
+    "model_version": "gpt2_6layer_384dim"
+  }
+}
