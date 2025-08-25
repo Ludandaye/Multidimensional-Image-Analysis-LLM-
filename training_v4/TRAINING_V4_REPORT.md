@@ -20,6 +20,11 @@
 - 切分策略: 分层切分（seed=42），每类80%训练/20%验证，保证验证覆盖10类
 
 ## 指标
+### 可视化
+![Confusion Matrix](results/v4_confusion_matrix.png)
+
+![Top-k Accuracy](results/v4_topk.png)
+
 - Overall 验证准确率: 0.2800（56/200）
 - 每类准确率:
   - 0: 0.5000 (10/20)
